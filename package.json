@@ -1,0 +1,22 @@
+{
+  "name": "graphql-engine",
+  "version": "1.0.0",
+  "description": "A minimal GraphQL server engine implementation",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "demo": "ts-node src/demo.ts",
+    "test": "jest",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {}
+}
