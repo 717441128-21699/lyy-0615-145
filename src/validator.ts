@@ -249,7 +249,8 @@ function validateFragmentSpread(
   }
 
   if (visitedFragments.has(fragmentName)) {
-    const cycleId = [...visitedFragments, fragmentName].sort().join('->');
+    const cycleFragments = [...visitedFragments].sort();
+    const cycleId = cycleFragments.join('->');
     if (!context.detectedCycles.has(cycleId)) {
       context.detectedCycles.add(cycleId);
       context.errors.push({

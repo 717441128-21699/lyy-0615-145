@@ -39,17 +39,23 @@ class DataLoaderImpl<K, V> implements IDataLoader<K, V> {
       }
     }
 
-    const promise = new Promise<V>((resolve, reject) => {
-      if (!this.options.batch || !this.batch || this.batch.hasDispatched) {
-        this.batch = {
-          keys: [],
-          callbacks: [],
-          hasDispatched: false
-        };
-        enqueuePostPromiseJob(() => this.dispatchBatch());
-      }
+    let batch: Batch<K, V>;
 
-      const batch = this.batch;
+    if (this.options.batch && this.batch && !this.batch.hasDispatched) {
+      batch = this.batch;
+    } else {
+      batch = {
+        keys: [],
+        callbacks: [],
+        hasDispatched: false
+      };
+      if (this.options.batch) {
+        this.batch = batch;
+      }
+      enqueuePostPromiseJob(() => this.dispatchBatch(batch));
+    }
+
+    const promise = new Promise<V>((resolve, reject) => {
       batch.keys.push(key);
       batch.callbacks.push((value: V | Error) => {
         if (value instanceof Error) {
@@ -99,8 +105,7 @@ class DataLoaderImpl<K, V> implements IDataLoader<K, V> {
     return this;
   }
 
-  private async dispatchBatch(): Promise<void> {
-    const batch = this.batch;
+  private async dispatchBatch(batch: Batch<K, V>): Promise<void> {
     if (!batch || batch.hasDispatched) {
       return;
     }

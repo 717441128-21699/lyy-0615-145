@@ -30,6 +30,7 @@ export function calculateDepth(
   variableValues: Record<string, any> = {}
 ): number {
   let maxDepth = 0;
+  const fragments = collectFragments(document);
 
   for (const def of document.definitions) {
     if (def.kind === ASTNodeKind.OPERATION_DEFINITION) {
@@ -40,7 +41,9 @@ export function calculateDepth(
         const depth = calculateSelectionSetDepth(
           def.selectionSet,
           rootType,
-          0
+          0,
+          fragments,
+          new Set()
         );
         maxDepth = Math.max(maxDepth, depth);
       }
@@ -50,10 +53,24 @@ export function calculateDepth(
   return maxDepth;
 }
 
+function collectFragments(
+  document: DocumentNode
+): Record<string, any> {
+  const fragments: Record<string, any> = {};
+  for (const def of document.definitions) {
+    if (def.kind === ASTNodeKind.FRAGMENT_DEFINITION) {
+      fragments[def.name.value] = def;
+    }
+  }
+  return fragments;
+}
+
 function calculateSelectionSetDepth(
   selectionSet: SelectionSetNode,
   parentType: GraphQLObjectType,
-  currentDepth: number
+  currentDepth: number,
+  fragments: Record<string, any>,
+  visitedFragments: Set<string>
 ): number {
   let maxDepth = currentDepth;
 
@@ -61,7 +78,9 @@ function calculateSelectionSetDepth(
     const depth = calculateSelectionDepth(
       selection,
       parentType,
-      currentDepth
+      currentDepth,
+      fragments,
+      visitedFragments
     );
     maxDepth = Math.max(maxDepth, depth);
   }
@@ -72,24 +91,37 @@ function calculateSelectionSetDepth(
 function calculateSelectionDepth(
   selection: SelectionNode,
   parentType: GraphQLObjectType,
-  currentDepth: number
+  currentDepth: number,
+  fragments: Record<string, any>,
+  visitedFragments: Set<string>
 ): number {
   if (selection.kind === ASTNodeKind.FIELD) {
-    return calculateFieldDepth(selection, parentType, currentDepth);
+    return calculateFieldDepth(selection, parentType, currentDepth, fragments, visitedFragments);
   } else if (selection.kind === ASTNodeKind.INLINE_FRAGMENT) {
-    if (selection.typeCondition) {
-      const typeName = selection.typeCondition.value;
-      const type = parentType;
-      return calculateSelectionSetDepth(
-        selection.selectionSet,
-        type,
-        currentDepth
-      );
-    }
     return calculateSelectionSetDepth(
       selection.selectionSet,
       parentType,
-      currentDepth
+      currentDepth,
+      fragments,
+      visitedFragments
+    );
+  } else if (selection.kind === ASTNodeKind.FRAGMENT_SPREAD) {
+    const fragmentName = selection.name.value;
+    if (visitedFragments.has(fragmentName)) {
+      return currentDepth;
+    }
+    const fragment = fragments[fragmentName];
+    if (!fragment) {
+      return currentDepth;
+    }
+    const typeName = fragment.typeCondition.value;
+    const type = parentType;
+    return calculateSelectionSetDepth(
+      fragment.selectionSet,
+      type,
+      currentDepth,
+      fragments,
+      new Set([...visitedFragments, fragmentName])
     );
   }
 
@@ -99,7 +131,9 @@ function calculateSelectionDepth(
 function calculateFieldDepth(
   field: FieldNode,
   parentType: GraphQLObjectType,
-  currentDepth: number
+  currentDepth: number,
+  fragments: Record<string, any>,
+  visitedFragments: Set<string>
 ): number {
   const fieldName = field.name.value;
   const schemaField = parentType.fields[fieldName];
@@ -114,7 +148,9 @@ function calculateFieldDepth(
     return calculateSelectionSetDepth(
       field.selectionSet,
       fieldType as GraphQLObjectType,
-      currentDepth + 1
+      currentDepth + 1,
+      fragments,
+      visitedFragments
     );
   }
 
@@ -132,6 +168,7 @@ export function calculateComplexity(
   let maxDepth = 0;
 
   const defaultComplexity = options.defaultComplexity ?? 1;
+  const fragments = collectFragments(document);
 
   for (const def of document.definitions) {
     if (def.kind === ASTNodeKind.OPERATION_DEFINITION) {
@@ -144,7 +181,9 @@ export function calculateComplexity(
           rootType,
           variableValues,
           defaultComplexity,
-          0
+          0,
+          fragments,
+          new Set()
         );
         totalComplexity += result.complexity;
         maxDepth = Math.max(maxDepth, result.depth);
@@ -181,7 +220,9 @@ function calculateSelectionSetComplexity(
   parentType: GraphQLObjectType,
   variableValues: Record<string, any>,
   defaultComplexity: number,
-  currentDepth: number
+  currentDepth: number,
+  fragments: Record<string, any>,
+  visitedFragments: Set<string>
 ): SelectionComplexityResult {
   let complexity = 0;
   let depth = currentDepth;
@@ -192,7 +233,9 @@ function calculateSelectionSetComplexity(
       parentType,
       variableValues,
       defaultComplexity,
-      currentDepth
+      currentDepth,
+      fragments,
+      visitedFragments
     );
     complexity += result.complexity;
     depth = Math.max(depth, result.depth);
@@ -206,7 +249,9 @@ function calculateSelectionComplexity(
   parentType: GraphQLObjectType,
   variableValues: Record<string, any>,
   defaultComplexity: number,
-  currentDepth: number
+  currentDepth: number,
+  fragments: Record<string, any>,
+  visitedFragments: Set<string>
 ): SelectionComplexityResult {
   if (selection.kind === ASTNodeKind.FIELD) {
     return calculateFieldComplexity(
@@ -214,7 +259,9 @@ function calculateSelectionComplexity(
       parentType,
       variableValues,
       defaultComplexity,
-      currentDepth
+      currentDepth,
+      fragments,
+      visitedFragments
     );
   } else if (selection.kind === ASTNodeKind.INLINE_FRAGMENT) {
     return calculateSelectionSetComplexity(
@@ -222,7 +269,27 @@ function calculateSelectionComplexity(
       parentType,
       variableValues,
       defaultComplexity,
-      currentDepth
+      currentDepth,
+      fragments,
+      visitedFragments
+    );
+  } else if (selection.kind === ASTNodeKind.FRAGMENT_SPREAD) {
+    const fragmentName = selection.name.value;
+    if (visitedFragments.has(fragmentName)) {
+      return { complexity: 0, depth: currentDepth };
+    }
+    const fragment = fragments[fragmentName];
+    if (!fragment) {
+      return { complexity: 0, depth: currentDepth };
+    }
+    return calculateSelectionSetComplexity(
+      fragment.selectionSet,
+      parentType,
+      variableValues,
+      defaultComplexity,
+      currentDepth,
+      fragments,
+      new Set([...visitedFragments, fragmentName])
     );
   }
 
@@ -234,7 +301,9 @@ function calculateFieldComplexity(
   parentType: GraphQLObjectType,
   variableValues: Record<string, any>,
   defaultComplexity: number,
-  currentDepth: number
+  currentDepth: number,
+  fragments: Record<string, any>,
+  visitedFragments: Set<string>
 ): SelectionComplexityResult {
   const fieldName = field.name.value;
   const schemaField = parentType.fields[fieldName];
@@ -257,7 +326,9 @@ function calculateFieldComplexity(
       fieldType as GraphQLObjectType,
       variableValues,
       defaultComplexity,
-      currentDepth + 1
+      currentDepth + 1,
+      fragments,
+      visitedFragments
     );
     childComplexity = result.complexity;
     childDepth = result.depth;

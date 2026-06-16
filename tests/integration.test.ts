@@ -305,6 +305,175 @@ describe('Integration Tests', () => {
     });
   });
 
+  describe('Fragment Integration', () => {
+    it('should batch DataLoader requests through fragment', async () => {
+      const context: Context = {
+        loaders: createDataLoaders(),
+        useDataLoader: true
+      };
+
+      const result = await graphql({
+        schema,
+        source: `
+          query GetUsersWithPosts {
+            users {
+              id
+              name
+              ...UserPosts
+            }
+          }
+          fragment UserPosts on User {
+            posts {
+              id
+              title
+            }
+          }
+        `,
+        contextValue: context
+      });
+
+      expect(result.errors).toBeUndefined();
+      expect(result.data).toBeDefined();
+      expect(Array.isArray(result.data?.users)).toBe(true);
+      expect(result.data?.users.length).toBe(3);
+      expect(result.data?.users[0].posts).toBeDefined();
+      expect(Array.isArray(result.data?.users[0].posts)).toBe(true);
+      expect(getQueryCount()).toBe(2);
+    });
+
+    it('should detect deep nesting inside fragment with maxDepth', async () => {
+      const context: Context = {
+        loaders: createDataLoaders(),
+        useDataLoader: true
+      };
+
+      const result = await graphql({
+        schema,
+        source: `
+          query ShallowQuery {
+            user(id: "1") {
+              id
+              ...DeepFragment
+            }
+          }
+          fragment DeepFragment on User {
+            posts {
+              author {
+                posts {
+                  author {
+                    posts {
+                      title
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `,
+        contextValue: context,
+        complexityOptions: {
+          maxDepth: 3,
+          maxComplexity: 10000
+        }
+      });
+
+      expect(result.errors).toBeDefined();
+      expect(result.errors?.length).toBeGreaterThan(0);
+      expect(result.errors?.[0].message).toContain('exceeds maximum allowed depth');
+      expect(result.data).toBeUndefined();
+      expect(getQueryCount()).toBe(0);
+    });
+
+    it('should detect high complexity inside fragment with maxComplexity', async () => {
+      const context: Context = {
+        loaders: createDataLoaders(),
+        useDataLoader: true
+      };
+
+      const result = await graphql({
+        schema,
+        source: `
+          query ShallowQuery {
+            users {
+              ...UserWithPosts
+            }
+          }
+          fragment UserWithPosts on User {
+            id
+            name
+            posts {
+              id
+              title
+              author {
+                name
+              }
+            }
+          }
+        `,
+        contextValue: context,
+        complexityOptions: {
+          maxDepth: 10,
+          maxComplexity: 5
+        }
+      });
+
+      expect(result.errors).toBeDefined();
+      expect(result.errors?.length).toBeGreaterThan(0);
+      expect(result.errors?.[0].message).toContain('exceeds maximum allowed complexity');
+      expect(result.data).toBeUndefined();
+      expect(getQueryCount()).toBe(0);
+    });
+
+    it('should work correctly with DataLoader and complexity analysis together', async () => {
+      const context: Context = {
+        loaders: createDataLoaders(),
+        useDataLoader: true
+      };
+
+      const result = await graphql({
+        schema,
+        source: `
+          query GetUsersWithPosts {
+            users {
+              id
+              name
+              ...UserPosts
+            }
+          }
+          fragment UserPosts on User {
+            posts {
+              id
+              title
+              ...PostAuthor
+            }
+          }
+          fragment PostAuthor on Post {
+            author {
+              id
+              name
+            }
+          }
+        `,
+        contextValue: context,
+        complexityOptions: {
+          maxDepth: 10,
+          maxComplexity: 1000
+        }
+      });
+
+      expect(result.errors).toBeUndefined();
+      expect(result.data).toBeDefined();
+      expect(result.extensions).toBeDefined();
+      expect(result.extensions?.depth).toBeGreaterThan(0);
+      expect(result.extensions?.complexity).toBeGreaterThan(0);
+      expect(Array.isArray(result.data?.users)).toBe(true);
+      expect(result.data?.users.length).toBe(3);
+      expect(result.data?.users[0].posts).toBeDefined();
+      expect(result.data?.users[0].posts[0]?.author).toBeDefined();
+      expect(getQueryCount()).toBe(3);
+    });
+  });
+
   describe('Multiple Operations', () => {
     it('should execute named operation', async () => {
       const context: Context = {
